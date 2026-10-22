@@ -1,0 +1,660 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0b1020">
+  <title>ScamGraph AI | Investigation Center</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <a class="brand" href="#overview">
+      <span class="brand-icon">SG</span>
+      <span><strong>ScamGraph <em>AI</em></strong><small>THREAT INTELLIGENCE</small></span>
+    </a>
+    <p class="nav-caption">WORKSPACE</p>
+    <nav>
+      <a class="nav-link active" href="#overview">◈ Overview</a>
+      <a class="nav-link" href="#analyzer">⌕ Message analyzer</a>
+      <a class="nav-link" href="#network">⌘ Investigation graph</a>
+      <a class="nav-link" href="#reports">▤ Report history</a>
+    </nav>
+    <div class="sidebar-bottom">
+      <div class="status-card">
+        <p class="eyebrow">SYSTEM STATUS</p>
+        <div>Backend <b id="apiStatus">Checking…</b></div>
+        <div>OCR <b id="ocrStatus">Checking…</b></div>
+        <div>Database <b id="dbStatus">Checking…</b></div>
+      </div>
+      <p class="sidebar-note">Evidence-led triage<br>Human verification required</p>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <span>Workspace / <strong>Investigation Center</strong></span>
+      <div class="top-actions">
+        <span class="live-dot">LOCAL WORKSPACE</span>
+        <button class="button button-quiet" id="refreshButton">↻ Refresh</button>
+      </div>
+    </header>
+
+    <div class="page">
+      <section class="hero" id="overview">
+        <div>
+          <p class="eyebrow">CYBER THREAT INVESTIGATION</p>
+          <h1>Find the signal.<br><span>Connect the evidence.</span></h1>
+          <p class="muted">Review suspicious messages, extract indicators and compare investigations using exact evidence matches.</p>
+        </div>
+        <a class="button button-primary" href="#analyzer">＋ New investigation</a>
+      </section>
+
+      <section class="stats-grid">
+        <article class="stat-card"><span>Total reports</span><strong id="totalReports">0</strong><small>Saved investigations</small></article>
+        <article class="stat-card"><span>High-risk triage</span><strong id="highRiskCount">0</strong><small>Rule-based flags</small></article>
+        <article class="stat-card"><span>Extracted indicators</span><strong id="indicatorCount">0</strong><small>Across visible reports</small></article>
+        <article class="stat-card"><span>Evidence links</span><strong id="connectionCount">0</strong><small>Shared indicator matches</small></article>
+      </section>
+
+      <section class="two-column">
+        <article class="panel" id="analyzer">
+          <div class="panel-heading">
+            <div><p class="eyebrow">01 / INPUT</p><h2>Message analyzer</h2><p class="muted">Paste a message or extract text from a screenshot.</p></div>
+            <span class="pill">OCR + RULES</span>
+          </div>
+
+          <form id="analysisForm">
+            <label for="title">Investigation title</label>
+            <input id="title" maxlength="160" placeholder="e.g. Suspicious bank KYC SMS">
+
+            <label for="source">Message source</label>
+            <select id="source">
+              <option value="SMS">SMS / Text message</option>
+              <option value="WhatsApp">WhatsApp</option>
+              <option value="Email">Email</option>
+              <option value="Social media">Social media</option>
+              <option value="Website">Website / Link</option>
+              <option value="Phone call">Phone call transcript</option>
+              <option value="Other">Other</option>
+            </select>
+
+            <div class="upload-zone">
+              <div class="upload-symbol">▧</div>
+              <div class="upload-text">
+                <strong>Screenshot evidence</strong>
+                <p>PNG, JPG, WEBP, BMP or TIFF · maximum 5 MB</p>
+                <p id="imageStatus" class="muted" aria-live="polite">Choose a screenshot to extract its text.</p>
+              </div>
+              <label class="button button-secondary" for="screenshot">Choose image</label>
+              <input type="file" id="screenshot" accept=".png,.jpg,.jpeg,.webp,.bmp,.tif,.tiff,image/*" hidden>
+            </div>
+
+            <div id="imagePreviewWrap" class="preview-wrap" hidden>
+              <img id="imagePreview" alt="Selected screenshot preview">
+              <button type="button" id="removeImage" class="button button-quiet">Remove image</button>
+            </div>
+            <button class="button button-secondary full-button" id="ocrButton" type="button" disabled>Extract text with OCR</button>
+
+            <div class="label-line">
+              <label for="message">Message text</label>
+              <span id="charCount">0 / 20000</span>
+            </div>
+            <textarea id="message" maxlength="20000" minlength="5"
+              placeholder="Paste a suspicious message or extract text from a screenshot…" required></textarea>
+            <p class="hint">OCR can make mistakes. Review and correct the text before analysis. Avoid submitting unnecessary personal information.</p>
+
+            <div id="formStatus" class="status-message" role="status" aria-live="polite"></div>
+            <button class="button button-primary full-button" id="analyzeButton" type="submit">Analyze investigation →</button>
+          </form>
+        </article>
+
+        <article class="panel" id="results">
+          <div class="panel-heading">
+            <div><p class="eyebrow">02 / FINDINGS</p><h2>Investigation result</h2><p class="muted">Evidence and reasons behind the triage score.</p></div>
+            <span class="pill" id="analysisMethod">AWAITING INPUT</span>
+          </div>
+
+          <div id="emptyResults" class="empty-state">
+            <div class="empty-orbit">⌕</div>
+            <h3>Ready to investigate</h3>
+            <p>Your result will appear here after you submit a message.</p>
+          </div>
+
+          <div id="resultContent" hidden>
+            <div class="risk-summary">
+              <div><small>TRIAGE LEVEL</small><strong id="riskLevel" class="risk-badge">—</strong></div>
+              <div class="score"><small>RULE SCORE</small><strong><span id="riskScore">0</span><small>/100</small></strong></div>
+            </div>
+            <div class="progress"><div id="riskBar"></div></div>
+            <p class="report-ref">Report ID <strong id="reportId">—</strong></p>
+
+            <div class="result-block">
+              <h3>What this means</h3>
+              <p id="assistantReply" class="assistant-reply"></p>
+            </div>
+            <div class="result-block">
+              <h3>Detected indicators <span class="count" id="indicatorResultCount">0</span></h3>
+              <ul id="indicatorsList" class="result-list"></ul>
+            </div>
+            <div class="result-block">
+              <h3>Why it was flagged</h3>
+              <ul id="reasonsList" class="result-list"></ul>
+            </div>
+            <div class="result-block">
+              <h3>Cross-report evidence</h3>
+              <p id="connectionsSummary" class="muted"></p>
+              <ul id="connectionsList" class="result-list"></ul>
+            </div>
+            <div class="result-block">
+              <h3>Recommended next steps</h3>
+              <ul id="nextStepsList" class="result-list"></ul>
+            </div>
+            <p id="resultNotice" class="notice"></p>
+          </div>
+        </article>
+      </section>
+
+      <section class="panel graph-panel" id="network">
+        <div class="panel-heading graph-heading">
+          <div><p class="eyebrow">03 / LINK ANALYSIS</p><h2>Investigation graph</h2>
+            <p class="muted">Every saved report is shown. Lines mean exact indicator matches.</p></div>
+          <button class="button button-secondary" id="loadGraphButton">Refresh graph ↻</button>
+        </div>
+
+        <div class="graph-legend">
+          <span><i class="legend-dot high"></i> High triage</span>
+          <span><i class="legend-dot medium"></i> Medium triage</span>
+          <span><i class="legend-dot low"></i> Low triage</span>
+          <span><i class="legend-line"></i> Shared evidence</span>
+          <span><i class="legend-dot isolated"></i> No link found</span>
+        </div>
+        <div id="graphCanvas" class="graph-canvas">
+          <p class="muted graph-empty">Loading investigations…</p>
+        </div>
+        <div class="graph-detail" id="graphDetail" aria-live="polite">
+          Select a graph node to see its evidence and connection status.
+        </div>
+        <p class="hint">The graph shows stored report relationships only. An isolated node means no matching indicators were found in this dataset, not that the message is safe.</p>
+      </section>
+
+      <section class="panel" id="reports">
+        <div class="panel-heading reports-heading">
+          <div><p class="eyebrow">04 / HISTORY</p><h2>Investigation reports</h2><p class="muted">Search saved reports and inspect their evidence.</p></div>
+          <button class="button button-secondary" id="loadReportsButton">Refresh reports ↻</button>
+        </div>
+        <input id="reportSearch" class="search-input" placeholder="Search title, source or risk level…">
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>Report</th><th>Source</th><th>Triage</th><th>Score</th><th>Indicators</th><th>Graph</th><th>Action</th></tr></thead>
+            <tbody id="reportsBody"><tr><td colspan="7">Loading reports…</td></tr></tbody>
+          </table>
+        </div>
+        <p id="reportsFooter" class="table-footer">Reports will appear here after loading.</p>
+      </section>
+
+      <footer class="footer">
+        <strong>ScamGraph AI</strong>
+        <span>Prototype · Rule-based triage · Human verification required</span>
+      </footer>
+    </div>
+  </main>
+</div>
+
+<script>
+"use strict";
+
+const $ = id => document.getElementById(id);
+let reportsCache = [];
+let graphCache = {nodes: [], edges: []};
+let previewUrl = null;
+
+function esc(value) {
+  return String(value ?? "").replace(/[&<>"']/g, char => ({
+    "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"
+  })[char]);
+}
+
+async function api(url, options = {}) {
+  const response = await fetch(url, options);
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.ok === false) {
+    throw new Error(data.error || `Request failed (${response.status})`);
+  }
+  return data;
+}
+
+function setStatus(message, type = "") {
+  $("formStatus").textContent = message;
+  $("formStatus").className = "status-message " + type;
+}
+
+function formatRisk(level) {
+  const normalized = String(level || "low").toLowerCase();
+  return ["high", "medium", "low"].includes(normalized) ? normalized : "low";
+}
+
+function renderList(id, items, emptyMessage) {
+  const list = $(id);
+  list.replaceChildren();
+  if (!Array.isArray(items) || !items.length) {
+    const li = document.createElement("li");
+    li.className = "muted";
+    li.textContent = emptyMessage;
+    list.appendChild(li);
+    return;
+  }
+  items.forEach(item => {
+    const li = document.createElement("li");
+    if (typeof item === "string") {
+      li.textContent = item;
+    } else if (item && typeof item === "object") {
+      const kind = item.type ? `${item.type.replaceAll("_", " ")}: ` : "";
+      li.textContent = kind + (item.value || item.explanation || JSON.stringify(item));
+    } else {
+      li.textContent = String(item);
+    }
+    list.appendChild(li);
+  });
+}
+
+function renderResult(data) {
+  const a = data.analysis || {};
+  const summary = data.summary || {};
+  $("emptyResults").hidden = true;
+  $("resultContent").hidden = false;
+  $("analysisMethod").textContent = (a.method || "RULE-BASED").replaceAll("_", " ").toUpperCase();
+  $("riskLevel").textContent = String(a.risk_level || "unknown").toUpperCase();
+  $("riskLevel").className = "risk-badge " + formatRisk(a.risk_level);
+  $("riskScore").textContent = Number(a.risk_score || 0);
+  $("riskBar").style.width = `${Math.max(0, Math.min(100, Number(a.risk_score || 0)))}%`;
+  $("riskBar").className = formatRisk(a.risk_level);
+  $("reportId").textContent = "#" + data.report_id;
+  $("assistantReply").textContent = data.reply || summary.headline || "Analysis complete. Review the evidence.";
+  $("indicatorResultCount").textContent = (a.indicators || []).length;
+  renderList("indicatorsList", a.indicators, "No supported indicators extracted.");
+  renderList("reasonsList", (a.reasons || []).map(r =>
+    `${r.explanation} (+${r.points} points)`), "No configured risk-language patterns matched.");
+  $("connectionsSummary").textContent = summary.cross_report_analysis ||
+    "No cross-report comparison available.";
+  renderList("connectionsList", (data.connections || []).map(c =>
+    `Report #${c.report_id} — ${c.title}; shared: ${(c.shared_indicators || []).map(i => `${i.type}: ${i.value}`).join(", ")}`),
+    "No shared indicators found. This report is still included as a graph node.");
+  renderList("nextStepsList", summary.recommended_next_steps || [],
+    "Verify the original message independently.");
+  $("resultNotice").textContent = data.notice || (a.limitations || []).join(" ");
+  $("results").scrollIntoView({behavior:"smooth", block:"start"});
+}
+
+$("message").addEventListener("input", () => {
+  $("charCount").textContent = `${$("message").value.length.toLocaleString()} / 20000`;
+});
+
+$("screenshot").addEventListener("change", () => {
+  const file = $("screenshot").files[0];
+  if (!file) return;
+  if (!file.type.startsWith("image/") || file.size > 5 * 1024 * 1024) {
+    $("imageStatus").textContent = "Choose a valid image no larger than 5 MB.";
+    $("ocrButton").disabled = true;
+    $("screenshot").value = "";
+    return;
+  }
+  if (previewUrl) URL.revokeObjectURL(previewUrl);
+  previewUrl = URL.createObjectURL(file);
+  $("imagePreview").src = previewUrl;
+  $("imagePreviewWrap").hidden = false;
+  $("imageStatus").textContent = `${file.name} selected. Click Extract text with OCR.`;
+  $("ocrButton").disabled = false;
+});
+
+$("removeImage").addEventListener("click", () => {
+  $("screenshot").value = "";
+  $("imagePreview").removeAttribute("src");
+  $("imagePreviewWrap").hidden = true;
+  $("ocrButton").disabled = true;
+  $("imageStatus").textContent = "Screenshot removed.";
+  if (previewUrl) URL.revokeObjectURL(previewUrl);
+  previewUrl = null;
+});
+
+$("ocrButton").addEventListener("click", async () => {
+  const file = $("screenshot").files[0];
+  if (!file) return;
+  $("ocrButton").disabled = true;
+  $("ocrButton").textContent = "Extracting text…";
+  $("imageStatus").textContent = "Sending image to local OCR service…";
+  try {
+    const formData = new FormData();
+    formData.append("image", file);
+    const data = await api("/api/ocr", {method:"POST", body:formData});
+    if (data.text) {
+      $("message").value = data.text;
+      $("message").dispatchEvent(new Event("input"));
+    }
+    $("imageStatus").textContent = data.message || "OCR complete. Review the text.";
+    setStatus("OCR finished. Correct any mistakes before analyzing.", "success");
+    $("message").focus();
+  } catch (error) {
+    $("imageStatus").textContent = error.message;
+    setStatus("OCR failed: " + error.message, "error");
+  } finally {
+    $("ocrButton").disabled = false;
+    $("ocrButton").textContent = "Extract text with OCR";
+  }
+});
+
+$("analysisForm").addEventListener("submit", async event => {
+  event.preventDefault();
+  const text = $("message").value.trim();
+  if (text.length < 5) {
+    setStatus("Enter at least 5 characters.", "error");
+    return;
+  }
+  if (text.length > 20000) {
+    setStatus("Maximum length is 20,000 characters.", "error");
+    return;
+  }
+
+  const button = $("analyzeButton");
+  button.disabled = true;
+  button.textContent = "Analyzing…";
+  setStatus("Analyzing message and comparing stored evidence…", "loading");
+
+  try {
+    const data = await api("/api/analyze", {
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({
+        title:$("title").value.trim() || "Investigation",
+        source:$("source").value,
+        text
+      })
+    });
+    renderResult(data);
+    setStatus("Investigation saved successfully.", "success");
+    await refreshDashboard(false);
+  } catch (error) {
+    setStatus(error.message, "error");
+  } finally {
+    button.disabled = false;
+    button.textContent = "Analyze investigation →";
+  }
+});
+
+function nodeColor(level) {
+  return formatRisk(level);
+}
+
+function renderGraph() {
+  const canvas = $("graphCanvas");
+  const nodes = graphCache.nodes || [];
+  const edges = graphCache.edges || [];
+  canvas.replaceChildren();
+
+  if (!nodes.length) {
+    const p = document.createElement("p");
+    p.className = "muted graph-empty";
+    p.textContent = "No reports yet. Analyze a message to create the first graph node.";
+    canvas.appendChild(p);
+    $("graphDetail").textContent = "The first report will appear here, even if it has no connections.";
+    return;
+  }
+
+  const width = Math.max(640, canvas.clientWidth || 900);
+  const height = Math.max(300, Math.min(520, 130 + nodes.length * 42));
+  const pad = 48;
+  const positions = {};
+  const centerX = width / 2;
+  const centerY = height / 2;
+  const radiusX = Math.max(80, width / 2 - pad);
+  const radiusY = Math.max(70, height / 2 - pad);
+
+  nodes.forEach((node, index) => {
+    const angle = (2 * Math.PI * index / nodes.length) - Math.PI / 2;
+    positions[node.id] = {
+      x: nodes.length === 1 ? centerX : centerX + radiusX * Math.cos(angle),
+      y: nodes.length === 1 ? centerY : centerY + radiusY * Math.sin(angle)
+    };
+  });
+
+  const svgNS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(svgNS, "svg");
+  svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  svg.setAttribute("role", "img");
+  svg.setAttribute("aria-label", "Graph of all saved investigations and their shared indicators");
+
+  edges.forEach(edge => {
+    const from = positions[edge.source];
+    const to = positions[edge.target];
+    if (!from || !to) return;
+    const line = document.createElementNS(svgNS, "line");
+    line.setAttribute("x1", from.x);
+    line.setAttribute("y1", from.y);
+    line.setAttribute("x2", to.x);
+    line.setAttribute("y2", to.y);
+    line.setAttribute("class", "graph-edge");
+    svg.appendChild(line);
+  });
+
+  nodes.forEach(node => {
+    const p = positions[node.id];
+    const group = document.createElementNS(svgNS, "g");
+    group.setAttribute("class", "graph-node");
+    group.setAttribute("tabindex", "0");
+    group.setAttribute("role", "button");
+    group.setAttribute("aria-label", `Report ${node.id}, ${node.risk_level}, ${node.connection_count} connections`);
+
+    const circle = document.createElementNS(svgNS, "circle");
+    circle.setAttribute("cx", p.x);
+    circle.setAttribute("cy", p.y);
+    circle.setAttribute("r", node.connected ? "15" : "12");
+    circle.setAttribute("class", `node-${nodeColor(node.risk_level)}${node.connected ? "" : " node-isolated"}`);
+    group.appendChild(circle);
+
+    const label = document.createElementNS(svgNS, "text");
+    label.setAttribute("x", p.x);
+    label.setAttribute("y", p.y + 31);
+    label.setAttribute("text-anchor", "middle");
+    label.setAttribute("class", "graph-label");
+    const shortTitle = (node.label || `Report ${node.id}`).slice(0, 18);
+    label.textContent = `#${node.id} ${shortTitle}`;
+    group.appendChild(label);
+
+    const status = document.createElementNS(svgNS, "text");
+    status.setAttribute("x", p.x);
+    status.setAttribute("y", p.y + 45);
+    status.setAttribute("text-anchor", "middle");
+    status.setAttribute("class", "graph-status");
+    status.textContent = node.connected ? `${node.connection_count} link(s)` : "No links";
+    group.appendChild(status);
+
+    const showDetail = () => showGraphDetail(node);
+    group.addEventListener("click", showDetail);
+    group.addEventListener("keydown", event => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        showDetail();
+      }
+    });
+    svg.appendChild(group);
+  });
+
+  canvas.appendChild(svg);
+}
+
+function showGraphDetail(node) {
+  const connectedEdges = (graphCache.edges || []).filter(
+    e => e.source === node.id || e.target === node.id
+  );
+  const shared = connectedEdges.flatMap(e => e.shared_indicators || []);
+  const unique = [...new Map(shared.map(i => [`${i.type}:${i.value}`, i])).values()];
+  $("graphDetail").replaceChildren();
+
+  const title = document.createElement("strong");
+  title.textContent = `Report #${node.id}: ${node.label}`;
+  const p = document.createElement("p");
+  p.textContent = `Triage: ${node.risk_level} (${node.risk_score}/100). ${node.connected
+    ? `Connected to ${node.connection_count} other report(s).`
+    : "No shared indicators were found. This report is shown as an isolated node."}`;
+  const evidence = document.createElement("p");
+  evidence.textContent = unique.length
+    ? "Shared evidence: " + unique.map(i => `${i.type}: ${i.value}`).join("; ")
+    : "Shared evidence: none found in the current saved dataset.";
+  $("graphDetail").append(title, p, evidence);
+}
+
+function renderReports() {
+  const query = $("reportSearch").value.trim().toLowerCase();
+  const reports = reportsCache.filter(r =>
+    [r.title, r.source, r.risk_level, r.id].some(v =>
+      String(v ?? "").toLowerCase().includes(query)
+    )
+  );
+  const tbody = $("reportsBody");
+  tbody.replaceChildren();
+
+  if (!reports.length) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 7;
+    td.textContent = query ? "No reports match your search." : "No saved reports yet.";
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+  }
+
+  reports.forEach(report => {
+    const tr = document.createElement("tr");
+    const cells = [
+      `#${report.id} · ${report.title || "Investigation"}`,
+      report.source || "Unknown",
+      report.risk_level || "low",
+      `${report.risk_score ?? 0}/100`,
+      String(report.indicator_count ?? (report.indicators || []).length),
+      report.connected ? `${report.connection_count} link(s)` : "Isolated node"
+    ];
+    cells.forEach((value, index) => {
+      const td = document.createElement("td");
+      td.textContent = value;
+      if (index === 2) {
+        td.innerHTML = `<span class="risk-badge ${nodeColor(report.risk_level)}">${esc(value)}</span>`;
+      }
+      tr.appendChild(td);
+    });
+
+    const actionCell = document.createElement("td");
+    const button = document.createElement("button");
+    button.className = "button button-quiet small-button";
+    button.textContent = "Inspect";
+    button.addEventListener("click", () => openReport(report.id));
+    actionCell.appendChild(button);
+    tr.appendChild(actionCell);
+    tbody.appendChild(tr);
+  });
+
+  $("reportsFooter").textContent = `Showing ${reports.length} of ${reportsCache.length} report(s).`;
+}
+
+async function openReport(id) {
+  try {
+    const data = await api(`/api/reports/${id}`);
+    const report = data.report;
+    const graphNode = (graphCache.nodes || []).find(n => n.id === String(id));
+    if (graphNode) showGraphDetail(graphNode);
+    $("title").value = report.title || "";
+    $("source").value = report.source || "Other";
+    $("message").value = report.raw_text || "";
+    $("message").dispatchEvent(new Event("input"));
+    $("formStatus").textContent = `Loaded report #${id} into the editor. Re-analyzing will create a new report.`;
+    $("formStatus").className = "status-message";
+    $("analyzer").scrollIntoView({behavior:"smooth"});
+  } catch (error) {
+    $("reportsFooter").textContent = error.message;
+  }
+}
+
+async function loadHealth() {
+  try {
+    const data = await api("/api/health");
+    $("apiStatus").textContent = "Online";
+    $("apiStatus").className = "status-ok";
+    $("dbStatus").textContent = data.database || "Ready";
+    $("dbStatus").className = "status-ok";
+    $("ocrStatus").textContent = data.ocr_available ? "Ready" : "Unavailable";
+    $("ocrStatus").className = data.ocr_available ? "status-ok" : "status-warn";
+  } catch {
+    $("apiStatus").textContent = "Offline";
+    $("apiStatus").className = "status-error";
+    $("ocrStatus").textContent = "Unknown";
+    $("dbStatus").textContent = "Unknown";
+  }
+}
+
+async function loadReports() {
+  const data = await api("/api/reports?limit=200");
+  reportsCache = data.reports || [];
+  renderReports();
+
+  $("totalReports").textContent = reportsCache.length;
+  $("highRiskCount").textContent = reportsCache.filter(
+    r => String(r.risk_level).toLowerCase() === "high"
+  ).length;
+  $("indicatorCount").textContent = reportsCache.reduce(
+    (total, r) => total + Number(r.indicator_count ?? (r.indicators || []).length), 0
+  );
+}
+
+async function loadGraph() {
+  graphCache = await api("/api/graph");
+  graphCache.nodes ||= [];
+  graphCache.edges ||= [];
+  const edgeDegree = {};
+  graphCache.edges.forEach(e => {
+    edgeDegree[e.source] = (edgeDegree[e.source] || 0) + 1;
+    edgeDegree[e.target] = (edgeDegree[e.target] || 0) + 1;
+  });
+  graphCache.nodes.forEach(n => {
+    n.connection_count = edgeDegree[n.id] || 0;
+    n.connected = n.connection_count > 0;
+  });
+
+  $("connectionCount").textContent = graphCache.edges.length;
+  renderGraph();
+
+  // Refresh report rows with the graph connection status.
+  const nodeMap = new Map(graphCache.nodes.map(n => [n.id, n]));
+  reportsCache = reportsCache.map(r => ({
+    ...r,
+    ...(nodeMap.get(String(r.id)) || {})
+  }));
+  renderReports();
+}
+
+async function refreshDashboard(showMessage = true) {
+  try {
+    await loadHealth();
+    await loadReports();
+    await loadGraph();
+    if (showMessage) setStatus("Dashboard refreshed.", "success");
+  } catch (error) {
+    if (showMessage) setStatus("Refresh failed: " + error.message, "error");
+  }
+}
+
+$("refreshButton").addEventListener("click", () => refreshDashboard());
+$("loadGraphButton").addEventListener("click", () => loadGraph().catch(e => setStatus(e.message, "error")));
+$("loadReportsButton").addEventListener("click", () => loadReports().catch(e => setStatus(e.message, "error")));
+$("reportSearch").addEventListener("input", renderReports);
+
+document.querySelectorAll(".nav-link").forEach(link => {
+  link.addEventListener("click", () => {
+    document.querySelectorAll(".nav-link").forEach(item => item.classList.remove("active"));
+    link.classList.add("active");
+  });
+});
+
+window.addEventListener("resize", () => renderGraph());
+refreshDashboard(false);
+</script>
+</body>
+</html>
