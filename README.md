@@ -232,6 +232,8 @@ B.Tech CSE (AI & ML)
 Puran Murti Vidyapeeth
 
 GitHub: [@ahanr1152-a11y](https://github.com/ahanr1152-a11y)
+        [@KrishKumar3k](https://github.com/KrishKumar3k)
+        [@nilendunathjha14339-art](https://github.com/nilendunathjha14339-art)
 
 ---
 
