@@ -226,7 +226,7 @@ Contributions, bug reports, and suggestions are welcome.
 
 ## 👨‍💻 Author
 
-**Ahan Raj**
+**Team TechSolvers**
 
 B.Tech CSE (AI & ML)  
 Puran Murti Vidyapeeth
