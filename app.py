@@ -408,28 +408,30 @@ def home():
 def health():
 
     try:
+        from database import USE_SUPABASE
         init_db()
 
         ocr = get_ocr_status()
+        db_backend = "supabase" if USE_SUPABASE else "sqlite"
 
         return jsonify({
             "ok": True,
             "service": "ScamGraph AI",
             "analysis_engine": "transparent_rule_based_demo",
-            "database": "ready",
+            "database": f"ready ({db_backend})",
+            "db_backend": db_backend,
             "ocr_available": ocr["available"],
+            "ocr_engine": ocr.get("engine"),
             "ocr_version": ocr["version"],
             "ocr_error": ocr["error"],
         })
 
-    except Exception:
-        logger.exception(
-            "Health check failed"
-        )
+    except Exception as exc:
+        logger.exception("Health check failed")
 
         return jsonify({
             "ok": False,
-            "error": "Backend check failed.",
+            "error": f"Backend check failed: {exc}",
         }), 500
 
 
@@ -724,19 +726,15 @@ def analyze():
         }), 201
 
     except ValueError as exc:
+        return error_response(str(exc))
 
+    except Exception as exc:
+
+        logger.exception("Analysis failed")
+
+        # Surface the real error so Supabase/DB issues are visible
         return error_response(
-            str(exc)
-        )
-
-    except Exception:
-
-        logger.exception(
-            "Analysis failed"
-        )
-
-        return error_response(
-            "Analysis failed. Check the VS Code terminal.",
+            f"Analysis failed: {exc}",
             500,
         )
 

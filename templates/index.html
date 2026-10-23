@@ -28,7 +28,7 @@
         <p class="eyebrow">SYSTEM STATUS</p>
         <div>Backend <b id="apiStatus">Checking…</b></div>
         <div>OCR <b id="ocrStatus">Checking…</b></div>
-        <div>Database <b id="dbStatus">Checking…</b></div>
+        <div>Storage <b id="dbStatus">Checking…</b></div>
       </div>
       <p class="sidebar-note">Evidence-led triage<br>Human verification required</p>
     </div>
@@ -747,15 +747,22 @@ async function loadHealth() {
     const data = await api("/api/health");
     $("apiStatus").textContent = "Online";
     $("apiStatus").className = "status-ok";
-    $("dbStatus").textContent = data.database || "Ready";
+    // Show which backend is active: Supabase or SQLite
+    const dbLabel = data.db_backend === "supabase" ? "Supabase ✓" : "SQLite (local)";
+    $("dbStatus").textContent = dbLabel;
     $("dbStatus").className = "status-ok";
-    $("ocrStatus").textContent = data.ocr_available ? "Ready" : "Unavailable";
+    const ocrLabel = data.ocr_available
+      ? (data.ocr_engine === "ocrspace" ? "OCR.space" : "Tesseract")
+      : "Unavailable";
+    $("ocrStatus").textContent = ocrLabel;
     $("ocrStatus").className = data.ocr_available ? "status-ok" : "status-warn";
-  } catch {
+  } catch (err) {
     $("apiStatus").textContent = "Offline";
     $("apiStatus").className = "status-error";
-    $("ocrStatus").textContent = "Unknown";
-    $("dbStatus").textContent = "Unknown";
+    $("ocrStatus").textContent = "—";
+    $("dbStatus").textContent = "—";
+    // Show the real backend error in the form status
+    setStatus("Backend error: " + err.message, "error");
   }
 }
 
