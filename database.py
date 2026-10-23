@@ -4,7 +4,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-DB_PATH = Path(__file__).resolve().parent / "scamgraph.db"
+import os
+
+# On Vercel, the project directory is read-only; only /tmp is writable.
+# Use /tmp for the database when running on Vercel, local path for dev.
+if os.environ.get("VERCEL") or os.environ.get("VERCEL_ENV"):
+    DB_PATH = Path("/tmp/scamgraph.db")
+else:
+    DB_PATH = Path(__file__).resolve().parent / "scamgraph.db"
 
 
 def connect():
