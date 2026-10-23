@@ -1,7 +1,9 @@
+import json
 import logging
 import os
 import re
 import shutil
+import urllib.request
 from io import BytesIO
 from pathlib import Path
 
@@ -129,6 +131,10 @@ def configure_tesseract():
 
 TESSERACT_PATH = configure_tesseract()
 
+# OCR.space cloud fallback — set OCRSPACE_API_KEY in Vercel env vars
+# Get a free key at https://ocr.space/OCRAPI
+OCRSPACE_API_KEY = os.environ.get("OCRSPACE_API_KEY", "").strip()
+
 
 # =========================================================
 # COMMON RESPONSE HELPER
@@ -147,7 +153,8 @@ def error_response(message, status=400):
 
 def get_ocr_status():
     """
-    Check whether the Tesseract engine can actually start.
+    Check whether Tesseract is available locally.
+    If not, report whether OCR.space cloud fallback is configured.
     """
 
     try:
@@ -157,45 +164,103 @@ def get_ocr_status():
 
         return {
             "available": True,
+            "engine": "tesseract",
             "version": version,
             "error": None,
         }
 
-    except pytesseract.TesseractNotFoundError:
+    except (pytesseract.TesseractNotFoundError, pytesseract.TesseractError, Exception):
+        # Tesseract not found — check if OCR.space fallback is configured.
+        if OCRSPACE_API_KEY:
+            return {
+                "available": True,
+                "engine": "ocrspace",
+                "version": "OCR.space cloud API",
+                "error": None,
+            }
+
         return {
             "available": False,
+            "engine": None,
             "version": None,
             "error": (
-                "Tesseract executable was not found. "
-                "Install Tesseract OCR or set TESSERACT_CMD "
-                "to the full path of tesseract.exe."
+                "Tesseract is unavailable and OCRSPACE_API_KEY is not set. "
+                "Add your OCR.space API key as an environment variable to "
+                "enable cloud OCR."
             ),
         }
 
-    except pytesseract.TesseractError as exc:
-        logger.exception(
-            "Tesseract engine error during health check"
+
+# =========================================================
+# OCR.SPACE CLOUD OCR FALLBACK
+# =========================================================
+
+def ocr_with_ocrspace(raw_bytes, filename):
+    """
+    Extract text from an image using the OCR.space REST API.
+    Requires OCRSPACE_API_KEY to be set in the environment.
+    Free tier: https://ocr.space/OCRAPI (500 req/day, max 1 MB/image).
+    """
+
+    # OCR.space free tier limit is 1 MB.
+    if len(raw_bytes) > 1024 * 1024:
+        raise ValueError(
+            "Image exceeds the 1 MB limit of the free OCR.space API. "
+            "Please use a smaller or compressed image."
         )
 
-        return {
-            "available": False,
-            "version": None,
-            "error": (
-                "Tesseract could not start correctly: "
-                f"{exc}"
-            ),
-        }
+    boundary = b"----OcrSpaceBoundary"
+    crlf = b"\r\n"
 
-    except Exception as exc:
-        logger.exception(
-            "Could not check Tesseract availability"
+    def field(name, value):
+        return (
+            b"--" + boundary + crlf
+            + f'Content-Disposition: form-data; name="{name}"'.encode() + crlf
+            + crlf
+            + value.encode() + crlf
         )
 
-        return {
-            "available": False,
-            "version": None,
-            "error": f"OCR check failed: {exc}",
-        }
+    safe_filename = Path(filename).name.encode() or b"upload.png"
+    body = (
+        field("apikey", OCRSPACE_API_KEY)
+        + field("language", "eng")
+        + field("isOverlayRequired", "false")
+        + field("detectOrientation", "true")
+        + field("scale", "true")
+        + field("OCREngine", "2")
+        + b"--" + boundary + crlf
+        + b'Content-Disposition: form-data; name="file"; filename="'
+        + safe_filename + b'"' + crlf
+        + b"Content-Type: application/octet-stream" + crlf
+        + crlf
+        + raw_bytes + crlf
+        + b"--" + boundary + b"--" + crlf
+    )
+
+    req = urllib.request.Request(
+        "https://api.ocr.space/parse/image",
+        data=body,
+        headers={
+            "Content-Type": f"multipart/form-data; boundary={boundary.decode()}",
+            "Content-Length": str(len(body)),
+        },
+        method="POST",
+    )
+
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        result = json.loads(resp.read().decode("utf-8"))
+
+    if result.get("IsErroredOnProcessing"):
+        error_msgs = result.get("ErrorMessage") or ["Unknown OCR.space error"]
+        raise RuntimeError(
+            error_msgs[0] if isinstance(error_msgs, list) else str(error_msgs)
+        )
+
+    parsed = result.get("ParsedResults") or []
+    if not parsed:
+        return ""
+
+    return parsed[0].get("ParsedText", "")
 
 
 # =========================================================
@@ -393,13 +458,13 @@ def ocr_image():
             "WEBP, BMP or TIFF."
         )
 
-    # Check Tesseract before processing the image.
+    # Check OCR availability (Tesseract locally, OCR.space on Vercel).
     ocr_status = get_ocr_status()
 
     if not ocr_status["available"]:
         return error_response(
             ocr_status["error"]
-            or "Tesseract OCR is unavailable.",
+            or "OCR is unavailable. Set OCRSPACE_API_KEY to enable cloud OCR.",
             500,
         )
 
@@ -434,42 +499,55 @@ def ocr_image():
 
             original.verify()
 
-        # Reopen the image after verification.
-        with Image.open(BytesIO(raw_bytes)) as original:
+        # ── Route to the correct OCR engine ──────────────────────
+        if ocr_status["engine"] == "ocrspace":
 
-            # Correct image orientation.
-            image = ImageOps.exif_transpose(
-                original
-            ).convert("RGB")
+            # Cloud path: OCR.space API (used on Vercel).
+            logger.info("Using OCR.space cloud API")
+            extracted = ocr_with_ocrspace(
+                raw_bytes,
+                upload.filename or "upload.png",
+            )
 
-            # Improve contrast and convert to grayscale.
-            image = ImageOps.grayscale(image)
-            image = ImageOps.autocontrast(image)
+        else:
 
-            # Upscale small screenshots to improve recognition.
-            if image.width < 1200:
+            # Local path: Tesseract (used in development).
+            logger.info("Using local Tesseract engine")
 
-                scale = min(
-                    2,
-                    1200 / max(image.width, 1),
-                )
+            with Image.open(BytesIO(raw_bytes)) as original:
 
-                new_size = (
-                    int(image.width * scale),
-                    int(image.height * scale),
-                )
+                # Correct image orientation.
+                image = ImageOps.exif_transpose(
+                    original
+                ).convert("RGB")
 
-                image = image.resize(
-                    new_size,
-                    Image.Resampling.LANCZOS,
-                )
+                # Improve contrast and convert to grayscale.
+                image = ImageOps.grayscale(image)
+                image = ImageOps.autocontrast(image)
 
-            # Extract English text from the image.
-            extracted = pytesseract.image_to_string(
-                image,
-                lang="eng",
-                config="--oem 3 --psm 6",
-            ).strip()
+                # Upscale small screenshots to improve recognition.
+                if image.width < 1200:
+
+                    scale = min(
+                        2,
+                        1200 / max(image.width, 1),
+                    )
+
+                    new_size = (
+                        int(image.width * scale),
+                        int(image.height * scale),
+                    )
+
+                    image = image.resize(
+                        new_size,
+                        Image.Resampling.LANCZOS,
+                    )
+
+                extracted = pytesseract.image_to_string(
+                    image,
+                    lang="eng",
+                    config="--oem 3 --psm 6",
+                ).strip()
 
         # Remove excessive blank lines.
         extracted = re.sub(
@@ -494,57 +572,35 @@ def ocr_image():
                 ),
             })
 
+        engine_label = (
+            "OCR.space cloud" if ocr_status["engine"] == "ocrspace"
+            else "Tesseract"
+        )
+
         return jsonify({
             "ok": True,
             "text": extracted,
             "message": (
-                "Text extracted. Review it before analysis."
+                f"Text extracted via {engine_label}. "
+                "Review it before analysis."
             ),
         })
 
-    except pytesseract.TesseractNotFoundError:
-
-        logger.exception(
-            "Tesseract executable not found during OCR"
-        )
-
-        return error_response(
-            "Tesseract executable was not found. "
-            "Install it or set TESSERACT_CMD to the full "
-            "path of tesseract.exe, then restart Flask.",
-            500,
-        )
-
-    except pytesseract.TesseractError as exc:
-
-        logger.exception(
-            "Tesseract engine error during OCR"
-        )
-
-        return error_response(
-            "Tesseract could not process this image. "
-            "Confirm that English language data is installed. "
-            f"Details: {exc}",
-            500,
-        )
+    except ValueError as exc:
+        return error_response(str(exc))
 
     except UnidentifiedImageError:
-
         return error_response(
             "The selected file is not a readable image."
         )
 
     except Exception:
-
-        logger.exception(
-            "Unexpected OCR failure"
-        )
-
+        logger.exception("Unexpected OCR failure")
         return error_response(
-            "OCR failed unexpectedly. "
-            "Check the VS Code terminal for details.",
+            "OCR failed unexpectedly. Check the server logs for details.",
             500,
         )
+
 
 
 # =========================================================
