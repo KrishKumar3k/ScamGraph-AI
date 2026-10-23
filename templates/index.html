@@ -36,7 +36,11 @@
     <header class="topbar">
       <span>Workspace / <strong>Investigation Center</strong></span>
       <div class="top-actions">
-        <span class="live-dot">LOCAL WORKSPACE</span>
+        <span class="live-dot">● LIVE</span>
+        <button class="button button-quiet" id="themeToggle" title="Toggle light/dark mode">
+          <span class="theme-icon" id="themeIcon">🌙</span>
+          <span id="themeLabel">Light mode</span>
+        </button>
         <button class="button button-quiet" id="refreshButton">↻ Refresh</button>
       </div>
     </header>
@@ -209,6 +213,33 @@ const $ = id => document.getElementById(id);
 let reportsCache = [];
 let graphCache = {nodes: [], edges: []};
 let previewUrl = null;
+
+// ── Theme toggle ─────────────────────────────────────────
+(function initTheme() {
+  const saved = localStorage.getItem("sg-theme") || "dark";
+  if (saved === "light") {
+    document.documentElement.setAttribute("data-theme", "light");
+    $("themeIcon").textContent = "☀️";
+    $("themeLabel").textContent = "Dark mode";
+  }
+})();
+
+$("themeToggle").addEventListener("click", () => {
+  const isLight = document.documentElement.getAttribute("data-theme") === "light";
+  if (isLight) {
+    document.documentElement.removeAttribute("data-theme");
+    localStorage.setItem("sg-theme", "dark");
+    $("themeIcon").textContent = "🌙";
+    $("themeLabel").textContent = "Light mode";
+  } else {
+    document.documentElement.setAttribute("data-theme", "light");
+    localStorage.setItem("sg-theme", "light");
+    $("themeIcon").textContent = "☀️";
+    $("themeLabel").textContent = "Dark mode";
+  }
+  // Re-render graph with updated colors
+  renderGraph();
+});
 
 function esc(value) {
   return String(value ?? "").replace(/[&<>"']/g, char => ({
