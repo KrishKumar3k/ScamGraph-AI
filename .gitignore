@@ -4,3 +4,11 @@ __pycache__/
 *.pyc
 .env
 .vercel/
+
+# Database (never commit real data)
+scamgraph.db
+*.db
+
+# Docker
+.dockerignore
+
