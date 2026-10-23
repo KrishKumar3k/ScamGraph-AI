@@ -191,7 +191,7 @@
         <input id="reportSearch" class="search-input" placeholder="Search title, source or risk level…">
         <div class="table-scroll">
           <table>
-            <thead><tr><th>Report</th><th>Source</th><th>Triage</th><th>Score</th><th>Indicators</th><th>Graph</th><th>Action</th></tr></thead>
+            <thead><tr><th>Report</th><th>Source</th><th>Triage</th><th>Score</th><th>Indicators</th><th>Date Added</th><th>Actions</th></tr></thead>
             <tbody id="reportsBody"><tr><td colspan="7">Loading reports…</td></tr></tbody>
           </table>
         </div>
@@ -633,6 +633,13 @@ function showGraphDetail(node) {
   $("graphDetail").append(title, p, evidence);
 }
 
+function formatDate(iso) {
+  if (!iso) return "—";
+  try {
+    return new Date(iso).toLocaleString("en-IN", {dateStyle:"medium", timeStyle:"short"});
+  } catch { return iso; }
+}
+
 function renderReports() {
   const query = $("reportSearch").value.trim().toLowerCase();
   const reports = reportsCache.filter(r =>
@@ -660,7 +667,7 @@ function renderReports() {
       report.risk_level || "low",
       `${report.risk_score ?? 0}/100`,
       String(report.indicator_count ?? (report.indicators || []).length),
-      report.connected ? `${report.connection_count} link(s)` : "Isolated node"
+      formatDate(report.created_at)
     ];
     cells.forEach((value, index) => {
       const td = document.createElement("td");
@@ -671,12 +678,25 @@ function renderReports() {
       tr.appendChild(td);
     });
 
+    // Actions cell: Inspect + Delete
     const actionCell = document.createElement("td");
-    const button = document.createElement("button");
-    button.className = "button button-quiet small-button";
-    button.textContent = "Inspect";
-    button.addEventListener("click", () => openReport(report.id));
-    actionCell.appendChild(button);
+    actionCell.style.display = "flex";
+    actionCell.style.gap = "6px";
+    actionCell.style.alignItems = "center";
+
+    const inspectBtn = document.createElement("button");
+    inspectBtn.className = "button button-quiet small-button";
+    inspectBtn.textContent = "Inspect";
+    inspectBtn.addEventListener("click", () => openReport(report.id));
+
+    const deleteBtn = document.createElement("button");
+    deleteBtn.className = "button button-delete small-button";
+    deleteBtn.textContent = "✕ Delete";
+    deleteBtn.title = "Delete this report (cannot be undone)";
+    deleteBtn.addEventListener("click", () => deleteReport(report.id, tr));
+
+    actionCell.appendChild(inspectBtn);
+    actionCell.appendChild(deleteBtn);
     tr.appendChild(actionCell);
     tbody.appendChild(tr);
   });
@@ -699,6 +719,24 @@ async function openReport(id) {
     $("analyzer").scrollIntoView({behavior:"smooth"});
   } catch (error) {
     $("reportsFooter").textContent = error.message;
+  }
+}
+
+async function deleteReport(id, rowEl) {
+  if (!confirm(`Delete report #${id}? This cannot be undone.`)) return;
+  try {
+    await api(`/api/reports/${id}`, {method: "DELETE"});
+    // Animate row out then remove
+    rowEl.style.transition = "opacity .25s";
+    rowEl.style.opacity = "0";
+    setTimeout(() => {
+      reportsCache = reportsCache.filter(r => r.id !== id);
+      renderReports();
+      $("reportsFooter").textContent = `Report #${id} deleted.`;
+      refreshDashboard(false);
+    }, 260);
+  } catch (error) {
+    alert("Could not delete report: " + error.message);
   }
 }
 

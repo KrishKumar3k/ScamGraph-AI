@@ -118,3 +118,15 @@ def get_all_reports():
             "SELECT * FROM reports ORDER BY id ASC"
         ).fetchall()
         return [row_to_report(row) for row in rows]
+
+
+def delete_report(report_id):
+    """Delete a report by ID. Returns True if a row was deleted."""
+    init_db()
+    with connect() as conn:
+        cursor = conn.execute(
+            "DELETE FROM reports WHERE id = ?",
+            (int(report_id),)
+        )
+        conn.commit()
+        return cursor.rowcount > 0

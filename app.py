@@ -18,6 +18,7 @@ from database import (
     get_report,
     list_reports,
     get_all_reports,
+    delete_report,
 )
 
 from scamgraph import (
@@ -819,6 +820,39 @@ def report_detail(report_id):
 
         return error_response(
             "Could not load report details.",
+            500,
+        )
+
+
+# =========================================================
+# DELETE A REPORT
+# =========================================================
+
+@app.delete("/api/reports/<int:report_id>")
+def delete_report_route(report_id):
+
+    try:
+
+        deleted = delete_report(report_id)
+
+        if not deleted:
+            return error_response(
+                f"Report #{report_id} not found.",
+                404,
+            )
+
+        return jsonify({
+            "ok": True,
+            "deleted_id": report_id,
+            "message": f"Report #{report_id} deleted successfully.",
+        })
+
+    except Exception:
+
+        logger.exception("Could not delete report")
+
+        return error_response(
+            "Could not delete report.",
             500,
         )
 

@@ -55,6 +55,7 @@
 
 /* ── Reset & base ─────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; }
+[hidden] { display: none !important; }   /* ensure hidden attr always wins */
 html { scroll-behavior: smooth; scroll-padding-top: 66px; }
 
 body {
@@ -340,6 +341,16 @@ textarea { min-height: 170px; resize: vertical; line-height: 1.7; }
 .button-quiet     { color: var(--text-dim); background: transparent; border-color: var(--border); }
 .full-button  { width: 100%; margin-top: 10px; }
 .small-button { padding: 5px 9px; font-size: 10px; }
+.button-delete {
+  color: var(--red);
+  background: transparent;
+  border-color: rgba(242, 96, 122, .35);
+}
+.button-delete:hover:not(:disabled) {
+  background: rgba(242, 96, 122, .1);
+  border-color: var(--red);
+  filter: none;
+}
 
 /* ══ STATUS ═══════════════════════════════════════════════ */
 .status-message { min-height: 16px; margin-top: 10px; font-size: 11px; overflow-wrap: anywhere; }
