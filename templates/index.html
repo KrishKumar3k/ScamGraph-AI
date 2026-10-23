@@ -80,20 +80,20 @@
               <option value="Other">Other</option>
             </select>
 
-            <div class="upload-zone">
+            <div class="upload-zone" id="uploadZone">
               <div class="upload-symbol">▧</div>
               <div class="upload-text">
                 <strong>Screenshot evidence</strong>
                 <p>PNG, JPG, WEBP, BMP or TIFF · maximum 5 MB</p>
-                <p id="imageStatus" class="muted" aria-live="polite">Choose a screenshot to extract its text.</p>
+                <p id="imageStatus" class="muted" aria-live="polite">Drag &amp; drop, paste (Ctrl+V), or choose a screenshot.</p>
               </div>
               <label class="button button-secondary" for="screenshot">Choose image</label>
               <input type="file" id="screenshot" accept=".png,.jpg,.jpeg,.webp,.bmp,.tif,.tiff,image/*" hidden>
             </div>
 
             <div id="imagePreviewWrap" class="preview-wrap" hidden>
-              <img id="imagePreview" alt="Selected screenshot preview">
-              <button type="button" id="removeImage" class="button button-quiet">Remove image</button>
+              <img id="imagePreview" alt="" width="0" height="0" style="max-width:100%;border-radius:6px;">
+              <button type="button" id="removeImage" class="button button-quiet">✕ Remove image</button>
             </div>
             <button class="button button-secondary full-button" id="ocrButton" type="button" disabled>Extract text with OCR</button>
 
@@ -128,7 +128,7 @@
               <div class="score"><small>RULE SCORE</small><strong><span id="riskScore">0</span><small>/100</small></strong></div>
             </div>
             <div class="progress"><div id="riskBar"></div></div>
-            <p class="report-ref">Report ID <strong id="reportId">—</strong></p>
+            <p class="report-ref">Report ID <strong id="reportId">—</strong> &nbsp;·&nbsp; Submitted <strong id="reportTime">—</strong></p>
 
             <div class="result-block">
               <h3>What this means</h3>
@@ -271,6 +271,7 @@ function renderResult(data) {
   $("riskBar").style.width = `${Math.max(0, Math.min(100, Number(a.risk_score || 0)))}%`;
   $("riskBar").className = formatRisk(a.risk_level);
   $("reportId").textContent = "#" + data.report_id;
+  $("reportTime").textContent = new Date().toLocaleString("en-IN", {dateStyle:"medium",timeStyle:"short"});
   $("assistantReply").textContent = data.reply || summary.headline || "Analysis complete. Review the evidence.";
   $("indicatorResultCount").textContent = (a.indicators || []).length;
   renderList("indicatorsList", a.indicators, "No supported indicators extracted.");
@@ -291,21 +292,59 @@ $("message").addEventListener("input", () => {
   $("charCount").textContent = `${$("message").value.length.toLocaleString()} / 20000`;
 });
 
-$("screenshot").addEventListener("change", () => {
-  const file = $("screenshot").files[0];
-  if (!file) return;
-  if (!file.type.startsWith("image/") || file.size > 5 * 1024 * 1024) {
-    $("imageStatus").textContent = "Choose a valid image no larger than 5 MB.";
-    $("ocrButton").disabled = true;
-    $("screenshot").value = "";
+// ── Shared image loader ─────────────────────────────────────────
+function loadImageFile(file) {
+  if (!file || !file.type.startsWith("image/")) {
+    $("imageStatus").textContent = "Only image files are supported.";
+    return;
+  }
+  if (file.size > 5 * 1024 * 1024) {
+    $("imageStatus").textContent = "Image must be smaller than 5 MB.";
     return;
   }
   if (previewUrl) URL.revokeObjectURL(previewUrl);
   previewUrl = URL.createObjectURL(file);
-  $("imagePreview").src = previewUrl;
+  const img = $("imagePreview");
+  img.onload = () => { img.removeAttribute("width"); img.removeAttribute("height"); };
+  img.src = previewUrl;
   $("imagePreviewWrap").hidden = false;
-  $("imageStatus").textContent = `${file.name} selected. Click Extract text with OCR.`;
+  $("imageStatus").textContent = `${file.name} (${(file.size/1024).toFixed(0)} KB) ready. Click Extract text with OCR.`;
   $("ocrButton").disabled = false;
+  // Store on the hidden input via DataTransfer
+  try {
+    const dt = new DataTransfer();
+    dt.items.add(file);
+    $("screenshot").files = dt.files;
+  } catch(_) {}
+}
+
+// File picker
+$("screenshot").addEventListener("change", () => {
+  const file = $("screenshot").files[0];
+  if (file) loadImageFile(file);
+});
+
+// ── Drag & Drop ──────────────────────────────────────────────────
+const zone = $("uploadZone");
+zone.addEventListener("dragover", e => { e.preventDefault(); zone.classList.add("drag-over"); });
+zone.addEventListener("dragleave", () => zone.classList.remove("drag-over"));
+zone.addEventListener("drop", e => {
+  e.preventDefault();
+  zone.classList.remove("drag-over");
+  const file = e.dataTransfer.files[0];
+  if (file) loadImageFile(file);
+});
+
+// ── Paste (Ctrl+V / ⌘V) ─────────────────────────────────────────
+document.addEventListener("paste", e => {
+  const items = (e.clipboardData || e.originalEvent?.clipboardData)?.items || [];
+  for (const item of items) {
+    if (item.type.startsWith("image/")) {
+      const file = item.getAsFile();
+      if (file) { loadImageFile(file); setStatus("Image pasted — ready for OCR.", "success"); }
+      break;
+    }
+  }
 });
 
 $("removeImage").addEventListener("click", () => {
@@ -423,6 +462,33 @@ function renderGraph() {
   svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
   svg.setAttribute("role", "img");
   svg.setAttribute("aria-label", "Graph of all saved investigations and their shared indicators");
+  svg.style.overflow = "visible";
+
+  // Shared tooltip element
+  const tooltipGroup = document.createElementNS(svgNS, "g");
+  tooltipGroup.setAttribute("id", "svgTooltip");
+  tooltipGroup.style.pointerEvents = "none";
+  tooltipGroup.style.display = "none";
+  const tooltipRect = document.createElementNS(svgNS, "rect");
+  tooltipRect.setAttribute("rx", "6");
+  tooltipRect.setAttribute("ry", "6");
+  tooltipRect.setAttribute("fill", "#0f1a2e");
+  tooltipRect.setAttribute("stroke", "#334155");
+  tooltipRect.setAttribute("stroke-width", "1");
+  const tooltipLine1 = document.createElementNS(svgNS, "text");
+  tooltipLine1.setAttribute("fill", "#e2e8f0");
+  tooltipLine1.setAttribute("font-size", "11");
+  tooltipLine1.setAttribute("font-family", "system-ui,sans-serif");
+  tooltipLine1.setAttribute("font-weight", "600");
+  const tooltipLine2 = document.createElementNS(svgNS, "text");
+  tooltipLine2.setAttribute("fill", "#94a3b8");
+  tooltipLine2.setAttribute("font-size", "10");
+  tooltipLine2.setAttribute("font-family", "system-ui,sans-serif");
+  const tooltipLine3 = document.createElementNS(svgNS, "text");
+  tooltipLine3.setAttribute("fill", "#64748b");
+  tooltipLine3.setAttribute("font-size", "10");
+  tooltipLine3.setAttribute("font-family", "system-ui,sans-serif");
+  tooltipGroup.append(tooltipRect, tooltipLine1, tooltipLine2, tooltipLine3);
 
   edges.forEach(edge => {
     const from = positions[edge.source];
@@ -477,9 +543,41 @@ function renderGraph() {
         showDetail();
       }
     });
+
+    // Hover tooltip
+    group.addEventListener("mouseenter", () => {
+      const cx = parseFloat(circle.getAttribute("cx"));
+      const cy = parseFloat(circle.getAttribute("cy"));
+      const connectedEdges = (graphCache.edges||[]).filter(e => e.source===node.id||e.target===node.id);
+      const shared = connectedEdges.flatMap(e=>e.shared_indicators||[]);
+      const unique = [...new Map(shared.map(i=>[`${i.type}:${i.value}`,i])).values()];
+      const topKeyword = unique.length ? unique[0].type.replace(/_/g," ")+": "+unique[0].value : "No shared indicators";
+      const riskLabel = (node.risk_level||"low").toUpperCase();
+      const scoreLabel = `Score: ${node.risk_score}/100`;
+
+      tooltipLine1.textContent = `#${node.id} · ${(node.label||"Report").slice(0,22)}`;
+      tooltipLine2.textContent = `${riskLabel} · ${scoreLabel}`;
+      tooltipLine3.textContent = topKeyword.slice(0,34);
+
+      const PAD = 8, LH = 14, TW = 200, TH = PAD*2 + LH*3;
+      let tx = cx + 18, ty = cy - TH/2;
+      if (tx + TW > width - 10) tx = cx - TW - 18;
+      if (ty < 4) ty = 4;
+      if (ty + TH > height - 4) ty = height - TH - 4;
+
+      tooltipRect.setAttribute("x", tx); tooltipRect.setAttribute("y", ty);
+      tooltipRect.setAttribute("width", TW); tooltipRect.setAttribute("height", TH);
+      tooltipLine1.setAttribute("x", tx+PAD); tooltipLine1.setAttribute("y", ty+PAD+LH*0.85);
+      tooltipLine2.setAttribute("x", tx+PAD); tooltipLine2.setAttribute("y", ty+PAD+LH*1.9);
+      tooltipLine3.setAttribute("x", tx+PAD); tooltipLine3.setAttribute("y", ty+PAD+LH*2.95);
+      tooltipGroup.style.display = "";
+    });
+    group.addEventListener("mouseleave", () => { tooltipGroup.style.display = "none"; });
+
     svg.appendChild(group);
   });
 
+  svg.appendChild(tooltipGroup); // tooltip always on top
   canvas.appendChild(svg);
 }
 

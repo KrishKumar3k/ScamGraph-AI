@@ -323,6 +323,16 @@ textarea { min-height: 180px; resize: vertical; line-height: 1.7; }
 
 .upload-zone > label { margin: 0; white-space: nowrap; }
 
+/* Drag-over highlight */
+.upload-zone.drag-over {
+  border-color: var(--cyan);
+  background: #0d2236;
+  box-shadow: 0 0 0 3px #56e0d025;
+  cursor: copy;
+}
+.upload-zone.drag-over .upload-symbol { background: #56e0d025; }
+
+
 .preview-wrap {
   display: flex;
   align-items: center;
