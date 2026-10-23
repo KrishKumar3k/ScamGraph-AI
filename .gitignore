@@ -9,6 +9,4 @@ __pycache__/
 scamgraph.db
 *.db
 
-# Docker
-.dockerignore
 
