@@ -1,4 +1,4 @@
 Flask
 Pillow
 pytesseract
-psycopg2-binary
+supabase

@@ -1,10 +1,14 @@
 """
 database.py - Storage layer for ScamGraph AI
+─────────────────────────────────────────────
 Priority:
-  1. Supabase / PostgreSQL -> DATABASE_URL env var
-  2. SQLite (local dev / Vercel /tmp fallback)
+  1. Supabase REST SDK  ->  SUPABASE_URL + SUPABASE_KEY env vars
+  2. SQLite             ->  local dev / Vercel /tmp fallback
 
-Add DATABASE_URL in Vercel -> Settings -> Environment Variables.
+How to get your Supabase credentials:
+  Supabase dashboard -> Project Settings -> API
+    Project URL  -> SUPABASE_URL
+    anon/public  -> SUPABASE_KEY
 """
 
 import json
@@ -13,124 +17,137 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
-DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
+# ── Supabase credentials ────────────────────────────────
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "").strip()
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "").strip()
+USE_SUPABASE = bool(SUPABASE_URL and SUPABASE_KEY)
 
-# Supabase returns "postgres://" but psycopg2 needs "postgresql://"
-if DATABASE_URL.startswith("postgres://"):
-    DATABASE_URL = "postgresql://" + DATABASE_URL[len("postgres://"):]
-
-USE_POSTGRES = bool(DATABASE_URL)
-
-# SQLite path for local dev or Vercel /tmp
+# ── SQLite path (fallback) ──────────────────────────────
 if os.environ.get("VERCEL") or os.environ.get("VERCEL_ENV"):
     SQLITE_PATH = Path("/tmp/scamgraph.db")
 else:
     SQLITE_PATH = Path(__file__).resolve().parent / "scamgraph.db"
 
+TABLE = "reports"
+
 
 # =========================================================
-# PostgreSQL helpers (Supabase)
+# Supabase SDK helpers
 # =========================================================
 
-def _pg_connect():
-    import psycopg2
-    return psycopg2.connect(DATABASE_URL)
+_supabase_client = None
+
+def _sb():
+    """Return a cached Supabase client."""
+    global _supabase_client
+    if _supabase_client is None:
+        from supabase import create_client
+        _supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
+    return _supabase_client
 
 
-def _pg_init():
-    conn = _pg_connect()
-    with conn:
-        with conn.cursor() as cur:
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS reports (
-                    id              SERIAL PRIMARY KEY,
-                    title           TEXT NOT NULL,
-                    source          TEXT NOT NULL,
-                    raw_text        TEXT NOT NULL,
-                    risk_score      INTEGER NOT NULL,
-                    risk_level      TEXT NOT NULL,
-                    indicators_json TEXT NOT NULL,
-                    reasons_json    TEXT NOT NULL,
-                    created_at      TEXT NOT NULL
-                )
-            """)
-    conn.close()
+def _sb_init():
+    """
+    Supabase manages its own schema via the dashboard or migrations.
+    Create the table manually once in Supabase SQL Editor:
+
+        CREATE TABLE IF NOT EXISTS reports (
+            id              BIGSERIAL PRIMARY KEY,
+            title           TEXT NOT NULL,
+            source          TEXT NOT NULL,
+            raw_text        TEXT NOT NULL,
+            risk_score      INTEGER NOT NULL,
+            risk_level      TEXT NOT NULL,
+            indicators_json TEXT NOT NULL DEFAULT ''[]'',
+            reasons_json    TEXT NOT NULL DEFAULT ''[]'',
+            created_at      TEXT NOT NULL
+        );
+
+    No action needed here at runtime.
+    """
+    pass
 
 
-def _pg_save(title, source, raw_text, result):
+def _sb_save(title, source, raw_text, result):
     created_at = datetime.now(timezone.utc).isoformat()
-    conn = _pg_connect()
-    with conn:
-        with conn.cursor() as cur:
-            cur.execute("""
-                INSERT INTO reports
-                  (title, source, raw_text, risk_score, risk_level,
-                   indicators_json, reasons_json, created_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
-            """, (
-                title, source, raw_text,
-                int(result.get("risk_score", 0)),
-                str(result.get("risk_level", "low")),
-                json.dumps(result.get("indicators", [])),
-                json.dumps(result.get("reasons", [])),
-                created_at,
-            ))
-            report_id = cur.fetchone()[0]
-    conn.close()
-    return report_id
+    row = {
+        "title":           title,
+        "source":          source,
+        "raw_text":        raw_text,
+        "risk_score":      int(result.get("risk_score", 0)),
+        "risk_level":      str(result.get("risk_level", "low")),
+        "indicators_json": json.dumps(result.get("indicators", [])),
+        "reasons_json":    json.dumps(result.get("reasons",    [])),
+        "created_at":      created_at,
+    }
+    response = _sb().table(TABLE).insert(row).execute()
+    return response.data[0]["id"]
 
 
-def _pg_get(report_id):
-    conn = _pg_connect()
-    with conn.cursor() as cur:
-        cur.execute("SELECT * FROM reports WHERE id = %s", (report_id,))
-        cols = [d[0] for d in cur.description]
-        row = cur.fetchone()
-    conn.close()
-    return _row_to_report(dict(zip(cols, row))) if row else None
+def _sb_get(report_id):
+    response = (
+        _sb().table(TABLE)
+        .select("*")
+        .eq("id", report_id)
+        .single()
+        .execute()
+    )
+    return _sb_row_to_report(response.data) if response.data else None
 
 
-def _pg_list(limit):
-    conn = _pg_connect()
-    with conn.cursor() as cur:
-        cur.execute("""
-            SELECT id, title, source, risk_score, risk_level,
-                   indicators_json, created_at
-            FROM reports ORDER BY id DESC LIMIT %s
-        """, (limit,))
-        cols = [d[0] for d in cur.description]
-        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
-    conn.close()
+def _sb_list(limit):
+    response = (
+        _sb().table(TABLE)
+        .select("id, title, source, risk_score, risk_level, indicators_json, created_at")
+        .order("id", desc=True)
+        .limit(limit)
+        .execute()
+    )
     out = []
-    for item in rows:
-        item["indicators"] = json.loads(item.pop("indicators_json") or "[]")
+    for item in (response.data or []):
+        item = dict(item)
+        item["indicators"] = json.loads(item.pop("indicators_json", "[]") or "[]")
         item["indicator_count"] = len(item["indicators"])
         out.append(item)
     return out
 
 
-def _pg_all():
-    conn = _pg_connect()
-    with conn.cursor() as cur:
-        cur.execute("SELECT * FROM reports ORDER BY id ASC")
-        cols = [d[0] for d in cur.description]
-        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
-    conn.close()
-    return [_row_to_report(r) for r in rows]
+def _sb_all():
+    response = (
+        _sb().table(TABLE)
+        .select("*")
+        .order("id")
+        .execute()
+    )
+    return [_sb_row_to_report(r) for r in (response.data or [])]
 
 
-def _pg_delete(report_id):
-    conn = _pg_connect()
-    with conn:
-        with conn.cursor() as cur:
-            cur.execute("DELETE FROM reports WHERE id = %s", (int(report_id),))
-            deleted = cur.rowcount > 0
-    conn.close()
-    return deleted
+def _sb_delete(report_id):
+    response = (
+        _sb().table(TABLE)
+        .delete()
+        .eq("id", report_id)
+        .execute()
+    )
+    return len(response.data or []) > 0
+
+
+def _sb_row_to_report(row):
+    return {
+        "id":         row["id"],
+        "title":      row["title"],
+        "source":     row["source"],
+        "raw_text":   row.get("raw_text", ""),
+        "risk_score": row["risk_score"],
+        "risk_level": row["risk_level"],
+        "indicators": json.loads(row.get("indicators_json", "[]") or "[]"),
+        "reasons":    json.loads(row.get("reasons_json",    "[]") or "[]"),
+        "created_at": row.get("created_at", ""),
+    }
 
 
 # =========================================================
-# SQLite helpers (local dev / Vercel)
+# SQLite helpers (local dev / Vercel /tmp)
 # =========================================================
 
 def _sqlite_connect():
@@ -170,7 +187,7 @@ def _sqlite_save(title, source, raw_text, result):
             int(result.get("risk_score", 0)),
             str(result.get("risk_level", "low")),
             json.dumps(result.get("indicators", [])),
-            json.dumps(result.get("reasons", [])),
+            json.dumps(result.get("reasons",    [])),
             created_at,
         ))
         conn.commit()
@@ -182,7 +199,7 @@ def _sqlite_get(report_id):
         row = conn.execute(
             "SELECT * FROM reports WHERE id = ?", (report_id,)
         ).fetchone()
-        return _row_to_report(dict(row)) if row else None
+        return _sqlite_row_to_report(dict(row)) if row else None
 
 
 def _sqlite_list(limit):
@@ -195,7 +212,7 @@ def _sqlite_list(limit):
     out = []
     for row in rows:
         item = dict(row)
-        item["indicators"] = json.loads(item.pop("indicators_json") or "[]")
+        item["indicators"] = json.loads(item.pop("indicators_json", "[]") or "[]")
         item["indicator_count"] = len(item["indicators"])
         out.append(item)
     return out
@@ -206,7 +223,7 @@ def _sqlite_all():
         rows = conn.execute(
             "SELECT * FROM reports ORDER BY id ASC"
         ).fetchall()
-        return [_row_to_report(dict(r)) for r in rows]
+        return [_sqlite_row_to_report(dict(r)) for r in rows]
 
 
 def _sqlite_delete(report_id):
@@ -218,16 +235,12 @@ def _sqlite_delete(report_id):
         return cur.rowcount > 0
 
 
-# =========================================================
-# Shared row conversion
-# =========================================================
-
-def _row_to_report(row):
+def _sqlite_row_to_report(row):
     return {
         "id":         row["id"],
         "title":      row["title"],
         "source":     row["source"],
-        "raw_text":   row["raw_text"],
+        "raw_text":   row.get("raw_text", ""),
         "risk_score": row["risk_score"],
         "risk_level": row["risk_level"],
         "indicators": json.loads(row.get("indicators_json", "[]") or "[]"),
@@ -237,38 +250,48 @@ def _row_to_report(row):
 
 
 # =========================================================
-# Public API (called by app.py — unchanged interface)
+# Public API  (app.py calls these — interface unchanged)
 # =========================================================
 
 def init_db():
-    if USE_POSTGRES:
-        _pg_init()
+    if USE_SUPABASE:
+        _sb_init()
     else:
         _sqlite_init()
 
 
 def save_report(title, source, raw_text, result):
     init_db()
-    return _pg_save(title, source, raw_text, result) if USE_POSTGRES else _sqlite_save(title, source, raw_text, result)
+    if USE_SUPABASE:
+        return _sb_save(title, source, raw_text, result)
+    return _sqlite_save(title, source, raw_text, result)
 
 
 def get_report(report_id):
     init_db()
-    return _pg_get(report_id) if USE_POSTGRES else _sqlite_get(report_id)
+    if USE_SUPABASE:
+        return _sb_get(report_id)
+    return _sqlite_get(report_id)
 
 
 def list_reports(limit=50):
     init_db()
     limit = max(1, min(int(limit), 200))
-    return _pg_list(limit) if USE_POSTGRES else _sqlite_list(limit)
+    if USE_SUPABASE:
+        return _sb_list(limit)
+    return _sqlite_list(limit)
 
 
 def get_all_reports():
     init_db()
-    return _pg_all() if USE_POSTGRES else _sqlite_all()
+    if USE_SUPABASE:
+        return _sb_all()
+    return _sqlite_all()
 
 
 def delete_report(report_id):
     """Delete a report by ID. Returns True if a row was deleted."""
     init_db()
-    return _pg_delete(report_id) if USE_POSTGRES else _sqlite_delete(report_id)
+    if USE_SUPABASE:
+        return _sb_delete(report_id)
+    return _sqlite_delete(report_id)
