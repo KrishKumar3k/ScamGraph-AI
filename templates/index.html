@@ -6,12 +6,14 @@
   <meta name="theme-color" content="#0b1020">
   <title>ScamGraph AI | Investigation Center</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="icon" type="image/png" href="{{ url_for('static', filename='logo.png') }}">
+  <link rel="apple-touch-icon" href="{{ url_for('static', filename='logo.png') }}">
 </head>
 <body>
 <div class="app-shell">
   <aside class="sidebar">
     <a class="brand" href="#overview">
-      <span class="brand-icon">SG</span>
+      <img src="{{ url_for('static', filename='logo.png') }}" alt="ScamGraph AI logo" class="brand-logo">
       <span><strong>ScamGraph <em>AI</em></strong><small>THREAT INTELLIGENCE</small></span>
     </a>
     <p class="nav-caption">WORKSPACE</p>
